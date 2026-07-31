@@ -1,0 +1,9 @@
+.env
+*.env
+stars_index.json
+stars_progress.json
+response.json
+__pycache__/
+*.pyc
+docs/
+CLAUDE.md
