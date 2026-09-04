@@ -10,7 +10,7 @@ import json
 import time
 import requests
 import anthropic
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -207,7 +207,7 @@ def main():
             "category": ai["category"],
             "complexity": ai["complexity"],
             "standalone": ai["standalone"],
-            "indexed_at": datetime.utcnow().isoformat()
+            "indexed_at": datetime.now(timezone.utc).isoformat()
         }
 
         progress[full_name] = entry
