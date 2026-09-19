@@ -7,3 +7,21 @@ __pycache__/
 *.pyc
 docs/
 CLAUDE.md
+
+# Personal state and generated evidence
+.env.*
+hf_catalogue.json
+.oracle-source-cache/
+oracle-runs/
+oracle-response.json
+oracle-brief.txt
+oracle-*.json
+oracle-*.txt
+brief.txt
+outputs/
+.agents/
+.codex/
+AGENTS.md
+*.backup
+.venv/
+venv/

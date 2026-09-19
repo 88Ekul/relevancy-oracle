@@ -29,6 +29,7 @@ GH_HEADERS = {
     "Accept": "application/vnd.github.v3.star+json"
 }
 
+
 def get_all_stars():
     """Fetch all starred repos with pagination."""
     stars = []
@@ -51,6 +52,7 @@ def get_all_stars():
     print(f"Total starred repos found: {len(stars)}\n")
     return stars
 
+
 def get_readme(owner, repo):
     """Fetch README content, return plain text (truncated to ~3000 chars)."""
     try:
@@ -65,6 +67,7 @@ def get_readme(owner, repo):
         pass
     return ""
 
+
 # ── Anthropic helper ───────────────────────────────────────────────────────────
 # Locked taxonomy — must match the list in the summarise_repo prompt exactly.
 # Any value the model returns that isn't in this set is corrected to "Other"
@@ -75,6 +78,7 @@ VALID_CATEGORIES = {
     "Learning-Resource", "API-Integration", "Security", "Other",
 }
 
+
 def _normalise_category(raw: str) -> str:
     """Return the category unchanged if it is valid, else fall back to Other."""
     if raw in VALID_CATEGORIES:
@@ -83,12 +87,14 @@ def _normalise_category(raw: str) -> str:
     print(f"    ⚠ Unknown category '{raw}' — corrected to '{corrected}'")
     return corrected
 
+
 client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
 SYSTEM_PROMPT = """You are an expert software analyst helping a developer understand their GitHub starred repositories.
 Your job is to write clear, honest, imaginative summaries that expand the developer's sense of what's possible.
 Don't just describe what a repo does — help the developer see unexpected use cases, combinations with other tools, 
 and creative applications they might not have considered. Be concrete, not vague."""
+
 
 def summarise_repo(name, description, language, topics, readme):
     """Send repo info to Claude and get a structured summary back."""
@@ -124,7 +130,9 @@ Return raw JSON only. No markdown, no backticks, no preamble."""
             if raw.startswith("json"):
                 raw = raw[4:]
         parsed = json.loads(raw.strip())
-        parsed["category"] = _normalise_category(parsed.get("category", "Other"))
+        parsed["category"] = _normalise_category(
+            parsed.get("category", "Other")
+        )
         return parsed
     except json.JSONDecodeError:
         return {
@@ -138,6 +146,7 @@ Return raw JSON only. No markdown, no backticks, no preamble."""
         print(f"    ⚠ Anthropic error: {e}")
         return None
 
+
 # ── Progress / resume ──────────────────────────────────────────────────────────
 def load_progress():
     if os.path.exists(PROGRESS_FILE):
@@ -145,19 +154,46 @@ def load_progress():
             return json.load(f)
     return {}
 
+
 def save_progress(indexed):
     with open(PROGRESS_FILE, "w") as f:
         json.dump(indexed, f)
 
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main():
     if not GITHUB_TOKEN or not ANTHROPIC_KEY:
-        print("ERROR: Set GITHUB_TOKEN and ANTHROPIC_API_KEY environment variables.")
+        print(
+            "ERROR: Set GITHUB_TOKEN and ANTHROPIC_API_KEY "
+            "environment variables."
+        )
         return
 
     stars = get_all_stars()
     progress = load_progress()  # {repo_full_name: indexed_entry}
-    
+
+    # GitHub is the source of truth. Remove previously indexed repositories
+    # that Luke has since unstarred, while preserving cached entries for all
+    # repositories that are still starred.
+    current_star_names = {
+        star.get("repo", star)["full_name"]
+        for star in stars
+    }
+
+    removed = sorted(set(progress) - current_star_names)
+
+    for full_name in removed:
+        del progress[full_name]
+
+    if removed:
+        save_progress(progress)
+        print(
+            f"Removed {len(removed)} repos that are no longer starred:"
+        )
+        for full_name in removed:
+            print(f"  - {full_name}")
+        print()
+
     total = len(stars)
     skipped = 0
     processed = 0
@@ -188,7 +224,7 @@ def main():
         )
 
         if ai is None:
-            print(f"    ✗ Failed, will retry next run")
+            print("    ✗ Failed, will retry next run")
             failed += 1
             time.sleep(5)
             continue
@@ -214,7 +250,10 @@ def main():
         save_progress(progress)
         processed += 1
 
-        print(f"    ✓ {ai['category']} | {ai['complexity']} | {ai['summary'][:80]}...")
+        print(
+            f"    ✓ {ai['category']} | {ai['complexity']} | "
+            f"{ai['summary'][:80]}..."
+        )
         time.sleep(BATCH_PAUSE)
 
     # Write final output
@@ -232,6 +271,7 @@ Done.
   Output      : {OUTPUT_FILE}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """)
+
 
 if __name__ == "__main__":
     main()
