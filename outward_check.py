@@ -42,6 +42,7 @@ from pathlib import Path
 
 import requests
 from anthropic import Anthropic
+from oracle_costs import CostControlError, message_call, mode_limit, RunSession
 from dotenv import load_dotenv
 from resource_identity import resource_identity
 from source_inspection import SourceInspector, coverage_description
@@ -204,9 +205,9 @@ def _identify_gaps(request: dict, inward_matches: list[dict]) -> list[dict]:
     else:
         user_block += "\nNo owned repos have been identified for this idea yet.\n"
 
-    client = Anthropic()
-    system = GAP_SYSTEM % {"max_gaps": MAX_GAPS}
-    response = client.messages.create(
+    client = Anthropic(timeout=180.0, max_retries=0)
+    system = GAP_SYSTEM % {"max_gaps": mode_limit('gaps', MAX_GAPS)}
+    response = message_call(client, 'gaps',
         model=MODEL,
         max_tokens=1000,
         system=system,
@@ -269,8 +270,8 @@ def _vet_candidates(gap: dict, candidates: list[dict], request: dict) -> dict | 
         f"GAP TO FILL: {gap['description']}\n\n"
         f"CANDIDATES:\n{candidate_text}"
     )
-    client = Anthropic()
-    response = client.messages.create(
+    client = Anthropic(timeout=180.0, max_retries=0)
+    response = message_call(client, 'vetting',
         model=MODEL,
         max_tokens=500,
         system=VET_SYSTEM,
@@ -319,6 +320,8 @@ def outward_check(request: dict, inward_matches: list[dict] | None = None,
     print("  Identifying gaps…", file=sys.stderr)
     try:
         gaps = _identify_gaps(request, inward_matches or [])
+    except CostControlError:
+        raise
     except Exception as exc:
         return {'candidates': [], 'source_reviews': [],
                 'identified_gaps': [],
@@ -333,7 +336,7 @@ def outward_check(request: dict, inward_matches: list[dict] | None = None,
     seen_candidates: set[str] = set()
 
     # Step 2 — for each gap: search, vet, judge
-    for gap in gaps[:MAX_GAPS]:
+    for gap in gaps[:mode_limit('gaps', MAX_GAPS)]:
         layer = gap.get("layer", "unknown")
         search_q = gap.get("search_query", query)
         print(f"  Searching for: {layer} ({search_q})…", file=sys.stderr)
@@ -382,6 +385,8 @@ def outward_check(request: dict, inward_matches: list[dict] | None = None,
         print(f"  Vetting {len(shortlist)} candidates for: {layer}…", file=sys.stderr)
         try:
             chosen = _vet_candidates(gap, shortlist, request)
+        except CostControlError:
+            raise
         except Exception as exc:
             gaps_unfilled.append(f'{layer}: candidate selection failed ({type(exc).__name__}).')
             continue
@@ -433,7 +438,7 @@ def outward_check(request: dict, inward_matches: list[dict] | None = None,
 
     return {
         "candidates":    candidates_out,
-        "identified_gaps": gaps[:MAX_GAPS],
+        "identified_gaps": gaps[:mode_limit('gaps', MAX_GAPS)],
         "gaps_unfilled": gaps_unfilled,
         "source_reviews": source_reviews,
     }
@@ -448,7 +453,15 @@ def _main(argv: list[str]) -> int:
     usage   = argv[2] if len(argv) > 2 and argv[2] in ("personal", "commercial") else "personal"
     request = {"query": query, "usage": usage}
     print(f'Outward check: "{query}" (usage: {usage})\n', file=sys.stderr)
-    result  = outward_check(request)
+    try:
+        with RunSession({**request, 'workflow': 'outward_only'}) as session:
+            result = session.stage('outward', lambda: outward_check(request))
+            result['cost_control'] = session.report()
+            session.data['status'] = 'complete'
+            session.save()
+    except CostControlError as exc:
+        print(str(exc), file=sys.stderr)
+        return 3
     print(json.dumps(result, indent=2, ensure_ascii=False))
     return 0
 

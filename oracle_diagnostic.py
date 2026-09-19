@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from oracle_costs import MODES
 
 
 def _version(distribution: str) -> str | None:
@@ -31,9 +32,12 @@ def diagnostic() -> dict:
             "catalogue_present": catalogue.is_file(),
         },
         "source_limits": {
-            "github_repositories": os.getenv("ORACLE_SOURCE_REPOS", "6"),
+            "default_mode": "standard",
+            "modes": MODES,
             "huggingface_results_per_type": os.getenv("ORACLE_HF_RESULTS", "2"),
         },
+        "cost_control": {"default_budget_usd": 1.0, "default_model_profile": "quality",
+                         "economical_quality_live_verified": False},
         "secrets_printed": False,
     }
 

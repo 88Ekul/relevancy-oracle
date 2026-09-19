@@ -6,6 +6,14 @@ and explains which resources or smaller components could help.
 
 ## Status
 
+Version 0.4 adds spending controls: `quick` is free local keyword matching;
+`standard` (default) and `deep` retain source inspection with different limits.
+Every Oracle model call is metered and checked against a US$1 default total run
+budget. Checkpoints preserve completed work; identical revision-bound evidence
+can reuse prior assessments. See [cost controls](#cost-controls-and-recovery).
+The optional economical model profile has not yet had a live quality comparison.
+These changes were tested offline; the earlier v0.3 live results are separate.
+
 Version 0.3 adds bounded source inspection and assembly advice. The Oracle reads
 selected GitHub code and Hugging Face cards, configuration and source at pinned
 revisions. It distinguishes whole tools, libraries, components, patterns,
@@ -36,6 +44,7 @@ users with permission to use the software under [LICENSE](LICENSE).
 | `relevancy_oracle.py` | Run the combined assessment and save its response and complete brief. |
 | `render_brief.py` | Render a saved response without another AI call. |
 | `oracle_diagnostic.py` | Report dependency and configuration presence without displaying secret values. |
+| `oracle_costs.py` | Reserve spending, record complete model usage and reuse completed stages/assessments. |
 
 ## Setup
 
@@ -139,6 +148,72 @@ The legacy indexer and query script currently name that model directly.
 Keep credentials, catalogues, source caches and generated reports private.
 They are not included in this distribution. Assistant skills customised for a
 particular user's machine are also not included.
+
+## Cost controls and recovery
+
+The default `--mode standard` inspects up to four GitHub repositories and three
+Hugging Face resources. `--mode deep` widens both to six. `--mode quick` performs
+local keyword matching only and makes no provider calls; it is not source-based
+advice. Both paid modes retain full-catalogue reasoning and evidence validators.
+
+Use `--max-cost-usd 1 --run-dir oracle-runs/example` to set a total budget and
+save private checkpoints. The default budget is US$1. It may stop the workflow
+before completion; exit code 3 and the rendered brief make that explicit.
+Resume with the same request/options and `--resume --run-dir oracle-runs/example`.
+The budget includes earlier attempts. Changed code, catalogues or settings
+prevent stale stage reuse. Resumed evidence keeps its original date.
+
+Before each paid call, the free token-count endpoint estimates input. The guard
+reserves that count plus 10% and 1,024 input tokens, plus maximum output tokens.
+Actual response usage is recorded in `usage.json`; list-price calculations are
+not invoices. Input counts are estimates, so provider account limits remain
+the billing backstop. Unknown model prices stop safely. SDK retries are disabled;
+uncertain failures retain their reservation and are not automatically retried.
+
+`--model-profile quality` is the default. Opt-in `economical` uses Haiku 4.5 for
+planning, vetting and file selection, Sonnet 4.6 for catalogue reasoning, and the
+configured main model for source/Hugging Face assessment and assembly. Offline
+tests cover routing; live answer quality and savings remain unverified.
+
+Completed responses and stages are reusable. Across new runs, only selection
+and assessment responses tied to identical immutable evidence, request, model,
+prompt/schema and runtime fingerprint are reused. New runs perform fresh
+discovery. Local reuse does not enable Anthropic prompt caching. Keep
+`.oracle-assessment-cache/` and `oracle-runs/` private. Legacy indexing and
+`query.py` are outside these Oracle budget controls.
+
+## Cost controls and recovery
+
+The default `--mode standard` inspects up to four GitHub repositories and three
+Hugging Face resources. `--mode deep` widens both to six. `--mode quick` performs
+local keyword matching only and makes no provider calls; it is not source-based
+advice. Both paid modes retain full-catalogue reasoning and evidence validators.
+
+Use `--max-cost-usd 1 --run-dir oracle-runs/example` to set a total budget and
+save private checkpoints. The default budget is US$1. It may stop the workflow
+before completion; exit code 3 and the rendered brief make that explicit.
+Resume with the same request/options and `--resume --run-dir oracle-runs/example`.
+The budget includes earlier attempts. Changed code, catalogues or settings
+prevent stale stage reuse. Resumed evidence keeps its original date.
+
+Before each paid call, the free token-count endpoint estimates input. The guard
+reserves that count plus 10% and 1,024 input tokens, plus maximum output tokens.
+Actual response usage is recorded in `usage.json`; list-price calculations are
+not invoices. Input counts are estimates, so provider account limits remain
+the billing backstop. Unknown model prices stop safely. SDK retries are disabled;
+uncertain failures retain their reservation and are not automatically retried.
+
+`--model-profile quality` is the default. Opt-in `economical` uses Haiku 4.5 for
+planning, vetting and file selection, Sonnet 4.6 for catalogue reasoning, and the
+configured main model for source/Hugging Face assessment and assembly. Offline
+tests cover routing; live answer quality and savings remain unverified.
+
+Completed responses and stages are reusable. Across new runs, only selection
+and assessment responses tied to identical immutable evidence, request, model,
+prompt/schema and runtime fingerprint are reused. New runs perform fresh
+discovery. Local reuse does not enable Anthropic prompt caching. Keep
+`.oracle-assessment-cache/` and `oracle-runs/` private. Legacy indexing and
+`query.py` are outside these Oracle budget controls.
 
 ## Licence
 

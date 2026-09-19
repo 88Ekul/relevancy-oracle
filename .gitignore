@@ -12,6 +12,7 @@ CLAUDE.md
 .env.*
 hf_catalogue.json
 .oracle-source-cache/
+.oracle-assessment-cache/
 oracle-runs/
 oracle-response.json
 oracle-brief.txt

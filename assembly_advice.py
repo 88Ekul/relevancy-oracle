@@ -6,6 +6,7 @@ import os
 import re
 
 from anthropic import Anthropic
+from oracle_costs import CostControlError, message_call
 
 from resource_identity import resource_identity
 
@@ -272,14 +273,14 @@ class AssemblyAdviser:
     def _ask(self, payload: dict) -> dict:
         if self._client is None:
             self._client = Anthropic(timeout=180.0, max_retries=0)
-        self.model_calls += 1
-        response = self._client.messages.create(
+        response = message_call(self._client, 'assembly',
             model=os.getenv("ORACLE_MODEL", "claude-opus-4-5"), max_tokens=5000,
             system=ASSEMBLY_PROMPT + "\nSubmit one report using the assembly_advice tool.",
             tools=[{"name": "assembly_advice", "description": "Record validated assembly advice.",
                     "input_schema": ASSEMBLY_SCHEMA}],
             tool_choice={"type": "tool", "name": "assembly_advice"},
             messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}])
+        self.model_calls += int(not getattr(response, '_oracle_replayed', False))
         self.input_tokens += response.usage.input_tokens
         self.output_tokens += response.usage.output_tokens
         blocks = [b for b in response.content if getattr(b, "type", None) == "tool_use"
@@ -303,6 +304,8 @@ class AssemblyAdviser:
         try:
             raw = self.ask(payload)
             result = validate_assembly(raw, request, resources, gaps)
+        except CostControlError:
+            raise
         except Exception as exc:
             raw = {"requirements": _fallback_requirements(request, gaps), "selections": [],
                    "data_flow": [], "open_requirements": gaps, "global_tests": [],

@@ -15,6 +15,7 @@ from pathlib import PurePosixPath
 from urllib.parse import quote
 
 from anthropic import Anthropic
+from oracle_costs import CostControlError, message_call
 
 from resource_identity import resource_identity
 from source_fetch import GitHubSource, SourceError, MANIFESTS, implementation_path, licence_path
@@ -269,8 +270,9 @@ class SourceInspector:
     def _ask(self, system: str, payload: dict) -> dict:
         if self._client is None:
             self._client = Anthropic(timeout=180.0, max_retries=0)
-        self.model_calls += 1
-        response = self._client.messages.create(
+        response = message_call(self._client,
+            'source_analysis' if system == ANALYSE_PROMPT else 'source_select',
+            reusable=bool(payload.get('revision')),
             model=os.getenv('ORACLE_MODEL', 'claude-opus-4-5'),
             max_tokens=4500 if system == ANALYSE_PROMPT else 700,
             system=system + '\nSubmit the result using report_inspection. The tool only records data; it executes no code.',
@@ -279,6 +281,7 @@ class SourceInspector:
                         {'type': 'object', 'properties': {'paths': _STRING_LIST}, 'required': ['paths'], 'additionalProperties': False}}],
             tool_choice={'type': 'tool', 'name': 'report_inspection'},
             messages=[{'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)}])
+        self.model_calls += int(not getattr(response, '_oracle_replayed', False))
         self.input_tokens += response.usage.input_tokens
         self.output_tokens += response.usage.output_tokens
         if response.stop_reason != 'tool_use':
@@ -302,7 +305,8 @@ class SourceInspector:
         try:
             snapshot = self.source.snapshot(name)
             paths = self.source.path_catalogue(snapshot)
-            selection = self.ask(SELECT_PROMPT, {'request': request, 'repository': name, 'paths': paths})
+            selection = self.ask(SELECT_PROMPT, {'request': request, 'repository': name,
+                                                 'revision': snapshot['revision'], 'paths': paths})
             requested = _strings(selection.get('paths'), 6)
             selected = [p for p in requested if p in snapshot['entries']]
             # Spend the bounded file budget on implementation before tests/examples.
@@ -345,6 +349,8 @@ class SourceInspector:
                        else _PERSONAL_LICENCES)
             licence['usage_ok'] = bool(licence.get('status') == 'text_inspected'
                                        and licence.get('spdx') in allowed)
+        except CostControlError:
+            raise
         except Exception as exc:
             # Provider exceptions can include raw request bodies; do not expose them.
             reason = str(exc) if isinstance(exc, SourceError) else f'Source analysis failed ({type(exc).__name__}); no recommendation verified.'

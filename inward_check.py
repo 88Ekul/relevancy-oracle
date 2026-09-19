@@ -24,10 +24,12 @@ from __future__ import annotations
 import json
 import os
 import sys
+import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
 from anthropic import Anthropic
+from oracle_costs import message_call, RunSession, CostControlError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -208,10 +210,10 @@ def inward_check(request: dict) -> dict:
         f"\nCATALOGUE ({snapshot['count']} owned repositories):\n{catalogue}"
     )
 
-    client = Anthropic()  # reads ANTHROPIC_API_KEY from the environment
+    client = Anthropic(timeout=180.0, max_retries=0)
     system = SYSTEM_PROMPT.replace("%%MAX_MATCHES%%", str(MAX_MATCHES))
 
-    response = client.messages.create(
+    response = message_call(client, 'inward',
         model=MODEL,
         max_tokens=4000,
         system=system,
@@ -226,10 +228,25 @@ def inward_check(request: dict) -> dict:
 
 # ── Thin standalone CLI (the same core Layer 4.5 will import) ──────────
 def _main(argv: list[str]) -> int:
-    if len(argv) < 2:
-        print('Usage: python inward_check.py "your build idea"', file=sys.stderr)
-        return 2
-    result = inward_check({"query": " ".join(argv[1:])})
+    parser = argparse.ArgumentParser(description='Budgeted catalogue reasoning only.')
+    parser.add_argument('query')
+    parser.add_argument('--max-cost-usd', type=float, default=1.0)
+    parser.add_argument('--run-dir', type=Path)
+    parser.add_argument('--resume', action='store_true')
+    args = parser.parse_args(argv[1:])
+    if args.resume and not args.run_dir:
+        parser.error('--resume requires --run-dir.')
+    request = {'query': args.query, 'workflow': 'inward_only'}
+    try:
+        with RunSession(request, max_cost_usd=args.max_cost_usd, run_dir=args.run_dir,
+                        resume=args.resume, catalogue_paths=[INDEX_PATH]) as session:
+            result = session.stage('inward', lambda: inward_check(request))
+            result['cost_control'] = session.report()
+            session.data['status'] = 'complete'
+            session.save()
+    except CostControlError as exc:
+        print(str(exc), file=sys.stderr)
+        return 3
     print(json.dumps(result, indent=2, ensure_ascii=False))
     return 0
 

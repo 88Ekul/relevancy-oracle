@@ -66,12 +66,23 @@ def render_brief(response: dict) -> str:
     stale = _staleness_note(snap)
     if stale:
         out(stale)
+    if response.get('cost_control'):
+        cost = response['cost_control']
+        out(f"Mode: {cost['mode']} | run: {response.get('run_status', 'unknown')} | model profile: {cost['model_profile']}")
+        if cost['mode'] == 'quick':
+            out('QUICK SHORTLIST ONLY: keyword matches; no source, licence, live search or assembly assessment.')
+        if response.get('run_status') in ('budget_stopped', 'stopped'):
+            out('INCOMPLETE ASSESSMENT: ' + response.get('stop_reason', 'Run stopped.'))
     out("")
 
     # --- What you already have ------------------------------------------
     out("WHAT YOU ALREADY HAVE")
     if matches:
         out(_render_inward(matches))
+    elif response.get('cost_control', {}).get('mode') == 'quick':
+        out('  No literal keyword matches. This does not rule out useful resources in the catalogue.')
+    elif response.get('run_status') in ('budget_stopped', 'stopped'):
+        out('  No completed inward matches are available; assessment is incomplete.')
     else:
         out("  Nothing in your index relates directly -- you're starting "
             "fresh on this one.")
@@ -81,6 +92,8 @@ def render_brief(response: dict) -> str:
     out("WHAT YOU'RE MISSING")
     if candidates:
         out(_render_outward(candidates))
+    elif response.get('cost_control', {}).get('mode') == 'quick' or response.get('run_status') in ('budget_stopped', 'stopped'):
+        out('  External coverage has not been established in this result.')
     else:
         out("  No external candidates surfaced -- either what you own covers "
             "it, or this needs a manual scout.")
@@ -89,7 +102,10 @@ def render_brief(response: dict) -> str:
     reviews = outward.get('source_reviews') or candidates
     if response.get('source_inspection'):
         out('SOURCE INSPECTION AND REUSE')
-        out('  Source was read at the revisions below. No downloaded code or integration tests were executed.')
+        if response.get('run_status') in ('budget_stopped', 'stopped'):
+            out('  Only completed source assessments below are available. The run stopped before all checks finished.')
+        else:
+            out('  Source was read at the revisions below. No downloaded code or integration tests were executed.')
         out('  Citations locate inspected text; engineering judgements still need the listed tests.')
         out('  Capability and absence judgements below apply only to inspected excerpts; absence across a whole repository is unverified.')
         out(_render_sources(matches + reviews))
@@ -138,6 +154,21 @@ def render_brief(response: dict) -> str:
                 f"[{selection.get('decision')}]")
             out("    Tests outstanding: " + "; ".join(selection.get("tests", [])))
 
+    if response.get('quick_huggingface_matches'):
+        out('SAVED HUGGING FACE KEYWORD MATCHES (UNASSESSED):')
+        for item in response['quick_huggingface_matches']:
+            out('  - ' + str(item.get('identity') or item.get('identifier') or item.get('id', '?')))
+    if response.get('cost_control'):
+        cost = response['cost_control']
+        out('')
+        out('COST AND REUSE')
+        out(f"  Recorded usage cost: ${cost['recorded_usd']:.6f}; committed including uncertain reservations: ${cost['committed_usd']:.6f}.")
+        out(f"  Total run budget: ${cost['budget_usd']:.2f}; remaining: ${cost['remaining_usd']:.6f}.")
+        out(f"  Paid API attempts: {cost['api_calls']}; reused responses: {cost['reused_calls']}; complete usage: {cost['usage_complete']}.")
+        for stage, usage in cost['stages'].items():
+            out(f"  - {stage}: {usage['calls']} calls, {usage['input_tokens']} input + {usage['output_tokens']} output + {usage['cache_input_tokens']} cache tokens; ${usage['recorded_usd']:.6f} recorded, ${usage['uncertain_reserved_usd']:.6f} uncertain.")
+        out('  ' + cost['note'])
+        out('  Checkpoints: ' + cost['run_directory'])
     return "\n".join(lines).rstrip() + "\n"
 
 

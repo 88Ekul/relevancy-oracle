@@ -17,6 +17,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlunpa
 
 import requests
 from anthropic import Anthropic
+from oracle_costs import CostControlError, message_call
 
 from resource_identity import resource_identity
 from source_fetch import implementation_path, readable_path
@@ -563,14 +564,16 @@ class HuggingFaceProvider:
                    max_tokens: int) -> dict:
         if self._client is None:
             self._client = Anthropic(timeout=180.0, max_retries=0)
-        self.model_calls += 1
-        response = self._client.messages.create(
+        response = message_call(self._client,
+            'hf_plan' if name == 'hf_search_plan' else 'hf_assessment',
+            reusable=name == 'hf_resource_assessment' and bool(payload.get('revision')),
             model=os.getenv("ORACLE_MODEL", "claude-opus-4-5"), max_tokens=max_tokens,
             system=system + f"\nSubmit one report using the {name} tool.",
             tools=[{"name": name, "description": "Record bounded Oracle provider analysis.",
                     "input_schema": schema}],
             tool_choice={"type": "tool", "name": name},
             messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}])
+        self.model_calls += int(not getattr(response, '_oracle_replayed', False))
         self.input_tokens += response.usage.input_tokens
         self.output_tokens += response.usage.output_tokens
         blocks = [b for b in response.content if getattr(b, "type", None) == "tool_use"
@@ -643,6 +646,8 @@ class HuggingFaceProvider:
                         plan[0]["repo_types"].append(repo_type)
                 return plan, raw_limits, "model"
             raise ValueError("No valid capability searches returned.")
+        except CostControlError:
+            raise
         except Exception as exc:
             preserved = []
             if 'raw' in locals() and isinstance(raw, dict):
@@ -814,6 +819,8 @@ class HuggingFaceProvider:
                                         for f in files}, "evidence_kinds": {f["path"]: _evidence_kind(f["path"])
                                                                             for f in files}})
                 fit = validate_hf_fit(raw_fit, files, repo_type)
+            except CostControlError:
+                raise
             except Exception as exc:
                 fit = validate_hf_fit({}, files, repo_type)
                 limitations.append(f"Hugging Face fit analysis failed ({type(exc).__name__}); suitability is uncertain.")
